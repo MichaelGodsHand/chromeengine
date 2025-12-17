@@ -50,8 +50,8 @@ RUN pip install --upgrade pip && \
     pip install --no-cache-dir -r daily_streaming/requirements.txt && \
     pip install --no-cache-dir daily-python
 
-# Install browser-use browsers (Chromium via Playwright)
-RUN python -m playwright install chromium --with-deps
+# browser-use uses CDP (Chrome DevTools Protocol) with the Chromium we installed via apt
+# No additional browser installation needed
 
 # Copy application code
 COPY fastapi_agent.py .
