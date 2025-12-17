@@ -53,6 +53,23 @@ USE_JUDGE = False  # Set to True to enable judge evaluation of agent tasks
 HEADLESS_MODE = os.getenv("HEADLESS_MODE", "false").lower() == "true"
 logger.info(f"🖥️ Headless mode: {HEADLESS_MODE}")
 
+# Chrome args for Docker/Cloud Run environments
+CHROME_ARGS = [
+    '--no-sandbox',  # Required for Docker
+    '--disable-setuid-sandbox',
+    '--disable-dev-shm-usage',  # Overcome limited resource problems
+    '--disable-gpu',  # Disable GPU acceleration
+    '--disable-software-rasterizer',
+    '--disable-extensions',
+    '--disable-background-networking',
+    '--disable-default-apps',
+    '--disable-sync',
+    '--metrics-recording-only',
+    '--no-first-run',
+    '--safebrowsing-disable-auto-update',
+    '--disable-blink-features=AutomationControlled',
+] if HEADLESS_MODE else []  # Only apply these flags in headless/Cloud Run mode
+
 
 # ============================================================================
 # Models for Daily Streaming
@@ -166,6 +183,7 @@ async def execute_action(request: ActionRequest):
                     headless=HEADLESS_MODE,
                     window_size={'width': 1280, 'height': 720},
                     keep_alive=True,
+                    args=CHROME_ARGS,
                 )
                 await browser.start()
                 session_data["browser"] = browser
@@ -188,6 +206,7 @@ async def execute_action(request: ActionRequest):
                 headless=HEADLESS_MODE,  # Auto-detects from environment
                 window_size={'width': 1280, 'height': 720},
                 keep_alive=True,  # Keep browser alive between requests
+                args=CHROME_ARGS,  # Add Docker/Cloud Run specific flags
             )
             
             # Start browser session ONCE - this creates the browser window
