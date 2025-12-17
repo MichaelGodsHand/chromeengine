@@ -472,7 +472,7 @@ IMPORTANT:
             # Get results from history
             success = history.is_done() and history.is_successful() is not False
             steps_taken = history.number_of_steps()
-            urls_visited = history.urls()
+            urls_visited = [url for url in history.urls() if url is not None]
         
         # Get current URL from browser after action
         try:
@@ -604,12 +604,8 @@ async def get_screenshot(session_id: str):
         if not page:
             raise HTTPException(status_code=500, detail="No active page in browser")
         
-        # Capture screenshot
-        screenshot_bytes = await page.screenshot()
-        
-        # Convert to base64
-        import base64
-        screenshot_b64 = base64.b64encode(screenshot_bytes).decode('utf-8')
+        # Capture screenshot (returns base64 string)
+        screenshot_b64 = await page.screenshot()
         
         return ScreenshotResponse(
             screenshot=screenshot_b64,
