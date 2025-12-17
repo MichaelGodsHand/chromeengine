@@ -45,6 +45,9 @@ app.add_middleware(
 # In production, use Redis or a database
 active_sessions: dict[str, dict] = {}
 
+# Screenshot cache: {session_id: {"screenshot": base64, "timestamp": time}}
+screenshot_cache: dict[str, dict] = {}
+
 # Agent configuration - easily toggle judge evaluation
 USE_JUDGE = False  # Set to True to enable judge evaluation of agent tasks
 
@@ -590,9 +593,21 @@ async def get_screenshot(session_id: str):
     Get the latest screenshot from a browser session.
     
     Returns base64-encoded PNG image data.
+    Uses caching to return last successful screenshot if new capture fails or is slow.
     """
+    import time
+    
     if session_id not in active_sessions:
         raise HTTPException(status_code=404, detail="Session not found")
+    
+    # Return cached screenshot if available and recent (< 1 second old)
+    if session_id in screenshot_cache:
+        cache_age = time.time() - screenshot_cache[session_id]["timestamp"]
+        if cache_age < 1.0:  # Cache valid for 1 second
+            return ScreenshotResponse(
+                screenshot=screenshot_cache[session_id]["screenshot"],
+                session_id=session_id
+            )
     
     try:
         session_data = active_sessions[session_id]
@@ -601,18 +616,50 @@ async def get_screenshot(session_id: str):
         # Get current page
         page = await browser.get_current_page()
         if not page:
+            # Return cached if available, even if old
+            if session_id in screenshot_cache:
+                logger.warning(f"Using cached screenshot (no active page)")
+                return ScreenshotResponse(
+                    screenshot=screenshot_cache[session_id]["screenshot"],
+                    session_id=session_id
+                )
             raise HTTPException(status_code=500, detail="No active page in browser")
         
-        # Capture screenshot (returns base64 string)
-        screenshot_b64 = await page.screenshot()
+        # Capture screenshot with timeout
+        try:
+            screenshot_b64 = await asyncio.wait_for(page.screenshot(), timeout=2.0)
+            
+            # Cache the successful screenshot
+            screenshot_cache[session_id] = {
+                "screenshot": screenshot_b64,
+                "timestamp": time.time()
+            }
+            
+            return ScreenshotResponse(
+                screenshot=screenshot_b64,
+                session_id=session_id
+            )
+        except asyncio.TimeoutError:
+            # Return cached screenshot if available
+            if session_id in screenshot_cache:
+                logger.warning(f"Screenshot timeout, returning cached version")
+                return ScreenshotResponse(
+                    screenshot=screenshot_cache[session_id]["screenshot"],
+                    session_id=session_id
+                )
+            raise HTTPException(status_code=504, detail="Screenshot capture timed out")
         
-        return ScreenshotResponse(
-            screenshot=screenshot_b64,
-            session_id=session_id
-        )
-        
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error capturing screenshot: {e}", exc_info=True)
+        # Return cached if available
+        if session_id in screenshot_cache:
+            logger.warning(f"Error in screenshot, returning cached version")
+            return ScreenshotResponse(
+                screenshot=screenshot_cache[session_id]["screenshot"],
+                session_id=session_id
+            )
         raise HTTPException(status_code=500, detail=str(e))
 
 
