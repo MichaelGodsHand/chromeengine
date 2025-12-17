@@ -59,19 +59,30 @@ class BrowserFrameStreamer(FrameProcessor):
                                 img_data = base64.b64decode(screenshot_b64)
                                 img = Image.open(io.BytesIO(img_data))
                                 
-                                # Convert to raw bytes for Pipecat
+                                # Convert to RGB if needed (remove alpha channel)
+                                if img.mode != 'RGB':
+                                    img = img.convert('RGB')
+                                
+                                # Resize to match video output dimensions (1280x720)
+                                img = img.resize((1280, 720), Image.Resampling.LANCZOS)
+                                
+                                # Convert PIL Image to raw RGB bytes
+                                # PIL Image.tobytes() returns raw bytes in the image's mode
+                                rgb_bytes = img.tobytes()
+                                
+                                # Create frame with raw RGB bytes
                                 frame = OutputImageRawFrame(
-                                    image=img.tobytes(),
-                                    size=img.size,
-                                    format=img.format or "PNG"
+                                    image=rgb_bytes,
+                                    size=(1280, 720),
+                                    format="RGB"
                                 )
                                 
                                 # Push frame to pipeline
                                 await self.push_frame(frame)
-                                logger.debug(f"📸 Pushed frame: {img.size}")
+                                logger.debug(f"📸 Pushed frame: 1280x720 RGB")
                         
             except Exception as e:
-                logger.error(f"Error capturing frame: {e}")
+                logger.error(f"Error capturing frame: {e}", exc_info=True)
             
             # Capture at ~10 FPS
             await asyncio.sleep(0.1)
@@ -108,6 +119,7 @@ async def run_browser_bot(
             video_out_enabled=True,   # Video output enabled!
             video_out_width=1280,     # Match canvas size
             video_out_height=720,
+            video_out_color_format="RGB",  # Explicitly set RGB format
             vad_enabled=False,        # No voice activity detection needed
             transcription_enabled=False,
         ),
