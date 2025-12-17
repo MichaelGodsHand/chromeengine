@@ -57,7 +57,7 @@ class BrowserFrameStreamer(FrameProcessor):
                 async with aiohttp.ClientSession() as session:
                     async with session.get(
                         f"{self.fastapi_url}/streaming/get-screenshot/{self.session_id}",
-                        timeout=aiohttp.ClientTimeout(total=3)  # Reduced timeout
+                        timeout=aiohttp.ClientTimeout(total=5)  # 5s timeout (endpoint has 2s screenshot timeout + cache fallback)
                     ) as response:
                         if response.status == 200:
                             data = await response.json()
@@ -110,7 +110,8 @@ class BrowserFrameStreamer(FrameProcessor):
                             logger.warning(f"⚠️ Screenshot request failed: HTTP {response.status}")
                         
             except asyncio.TimeoutError:
-                logger.warning("⏱️ Screenshot request timed out")
+                # Timeout is handled by endpoint cache - continue to next frame
+                logger.debug("⏱️ Screenshot request timed out (using cache)")
             except Exception as e:
                 logger.error(f"❌ Error capturing frame: {e}", exc_info=True)
             
