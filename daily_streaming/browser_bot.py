@@ -47,17 +47,19 @@ class BrowserFrameStreamer(FrameProcessor):
         frame_count = 0
         frame_interval = 0.25  # 4 FPS = 250ms between frames (more stable)
         last_frame_time = time.time()
+        last_successful_frame = None  # Keep last frame as fallback
         logger.info("🎬 Starting frame capture loop at 4 FPS...")
         
         while self._is_streaming:
             frame_start_time = time.time()
+            frame_sent = False
             
             try:
-                # Get screenshot from FastAPI
+                # Get screenshot from FastAPI - increased timeout to allow slow frames
                 async with aiohttp.ClientSession() as session:
                     async with session.get(
                         f"{self.fastapi_url}/streaming/get-screenshot/{self.session_id}",
-                        timeout=aiohttp.ClientTimeout(total=5)  # 5s timeout (endpoint has 2s screenshot timeout + cache fallback)
+                        timeout=aiohttp.ClientTimeout(total=15)  # 15s timeout to allow slow captures
                     ) as response:
                         if response.status == 200:
                             data = await response.json()
@@ -90,11 +92,18 @@ class BrowserFrameStreamer(FrameProcessor):
                                         format="RGB"
                                     )
                                     
-                                    # Push frame to pipeline - let Daily handle it
+                                    # Push frame to pipeline - ALWAYS send even if slow
                                     try:
+                                        elapsed_before_send = time.time() - frame_start_time
                                         await self.push_frame(frame)
                                         frame_count += 1
-                                        if frame_count % 12 == 0:  # Log every 12 frames (~3 seconds at 4 FPS)
+                                        frame_sent = True
+                                        last_successful_frame = frame  # Store for fallback
+                                        
+                                        # Log every frame if slow, otherwise every 12 frames
+                                        if elapsed_before_send > 1.0:
+                                            logger.info(f"📸 Sent frame #{frame_count} (took {elapsed_before_send:.2f}s): {width}x{height} RGB")
+                                        elif frame_count % 12 == 0:
                                             logger.info(f"📸 Sent {frame_count} frames, latest: {width}x{height} RGB ({len(rgb_bytes)} bytes)")
                                     except Exception as frame_error:
                                         logger.error(f"❌ Error pushing frame #{frame_count}: {frame_error}", exc_info=True)
@@ -110,10 +119,26 @@ class BrowserFrameStreamer(FrameProcessor):
                             logger.warning(f"⚠️ Screenshot request failed: HTTP {response.status}")
                         
             except asyncio.TimeoutError:
-                # Timeout is handled by endpoint cache - continue to next frame
-                logger.debug("⏱️ Screenshot request timed out (using cache)")
+                # Timeout occurred - send last successful frame if available
+                elapsed = time.time() - frame_start_time
+                logger.warning(f"⏱️ Screenshot request timed out after {elapsed:.2f}s")
+                if last_successful_frame is not None:
+                    try:
+                        await self.push_frame(last_successful_frame)
+                        logger.info(f"📸 Sent cached frame (timeout fallback)")
+                        frame_sent = True
+                    except Exception as e:
+                        logger.error(f"❌ Error sending cached frame: {e}")
             except Exception as e:
                 logger.error(f"❌ Error capturing frame: {e}", exc_info=True)
+            
+            # If we didn't send a frame and have a cached one, send it
+            if not frame_sent and last_successful_frame is not None:
+                try:
+                    await self.push_frame(last_successful_frame)
+                    logger.debug("📸 Sent cached frame (error fallback)")
+                except Exception as e:
+                    logger.error(f"❌ Error sending cached frame: {e}")
             
             # Maintain consistent frame timing - sleep for remaining time
             elapsed = time.time() - frame_start_time
