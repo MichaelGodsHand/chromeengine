@@ -53,11 +53,10 @@ USE_JUDGE = False  # Set to True to enable judge evaluation of agent tasks
 HEADLESS_MODE = os.getenv("HEADLESS_MODE", "false").lower() == "true"
 logger.info(f"🖥️ Headless mode: {HEADLESS_MODE}")
 
-# API URL for bot to connect back (used by browser_bot.py)
-API_PORT = int(os.getenv("PORT", "8080"))
-API_HOST = os.getenv("API_HOST", "localhost")
-FASTAPI_URL = f"http://{API_HOST}:{API_PORT}"
-logger.info(f"🌐 FastAPI URL for bots: {FASTAPI_URL}")
+# Internal API URL for bot to connect back (localhost since bot runs in same container)
+API_PORT = int(os.getenv("PORT", "8000"))
+INTERNAL_API_URL = f"http://localhost:{API_PORT}"
+logger.info(f"🔗 Internal API URL: {INTERNAL_API_URL}")
 
 # Chrome args for Docker/Cloud Run environments
 CHROME_ARGS = [
@@ -569,7 +568,7 @@ async def create_daily_room(request: CreateRoomRequest):
         bot_id = await start_bot_for_session(
             session_id=request.session_id,
             room_url=room_data["url"],
-            fastapi_url=FASTAPI_URL
+            fastapi_url=INTERNAL_API_URL
         )
         
         active_sessions[request.session_id]["bot_id"] = bot_id
