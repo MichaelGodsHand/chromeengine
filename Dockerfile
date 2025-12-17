@@ -34,7 +34,9 @@ RUN apt-get update && apt-get install -y \
 # Set environment variables for headless Chrome
 ENV CHROME_BIN=/usr/bin/chromium
 ENV CHROMIUM_PATH=/usr/bin/chromium
+ENV CHROME_PATH=/usr/bin/chromium
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+ENV HEADLESS_MODE=true
 
 # Set working directory
 WORKDIR /app
