@@ -694,9 +694,9 @@ if __name__ == "__main__":
     print("="*60)
     print("Browser-Use FastAPI Agent")
     print("="*60)
-    print("\nStarting server on http://localhost:8000")
-    print("API docs available at http://localhost:8000/docs")
+    print("\nStarting server on http://localhost:8080")
+    print("API docs available at http://localhost:8080/docs")
     print("\nMake sure OPENAI_API_KEY is set in your environment!")
     print("="*60)
     
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    uvicorn.run(app, host="0.0.0.0", port=8080)
