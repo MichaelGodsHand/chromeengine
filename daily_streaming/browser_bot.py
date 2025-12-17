@@ -59,27 +59,29 @@ class BrowserFrameStreamer(FrameProcessor):
                                 img_data = base64.b64decode(screenshot_b64)
                                 img = Image.open(io.BytesIO(img_data))
                                 
+                                # Get actual image dimensions (preserve aspect ratio)
+                                width, height = img.size
+                                
                                 # Convert to RGB if needed (remove alpha channel)
                                 if img.mode != 'RGB':
                                     img = img.convert('RGB')
                                 
-                                # Resize to match video output dimensions (1280x720)
-                                img = img.resize((1280, 720), Image.Resampling.LANCZOS)
-                                
-                                # Convert PIL Image to raw RGB bytes
-                                # PIL Image.tobytes() returns raw bytes in the image's mode
+                                # Convert to raw RGB bytes - let Daily handle aspect ratio
                                 rgb_bytes = img.tobytes()
                                 
-                                # Create frame with raw RGB bytes
+                                # Create frame with actual image dimensions
                                 frame = OutputImageRawFrame(
                                     image=rgb_bytes,
-                                    size=(1280, 720),
+                                    size=(width, height),
                                     format="RGB"
                                 )
                                 
-                                # Push frame to pipeline
-                                await self.push_frame(frame)
-                                logger.debug(f"📸 Pushed frame: 1280x720 RGB")
+                                # Push frame to pipeline - let Daily handle it
+                                try:
+                                    await self.push_frame(frame)
+                                    logger.debug(f"📸 Pushed frame: {width}x{height} RGB")
+                                except Exception as frame_error:
+                                    logger.error(f"Error pushing frame: {frame_error}", exc_info=True)
                         
             except Exception as e:
                 logger.error(f"Error capturing frame: {e}", exc_info=True)
@@ -117,9 +119,10 @@ async def run_browser_bot(
             audio_in_enabled=False,   # No audio input
             audio_out_enabled=False,  # No audio output
             video_out_enabled=True,   # Video output enabled!
-            video_out_width=1280,     # Match canvas size
-            video_out_height=720,
-            video_out_color_format="RGB",  # Explicitly set RGB format
+            camera_out_enabled=True,   # Explicitly enable camera output
+            video_out_width=1280,      # Hint for Daily (browser window size)
+            video_out_height=720,      # Hint for Daily (browser window size)
+            video_out_color_format="RGB",  # RGB format
             vad_enabled=False,        # No voice activity detection needed
             transcription_enabled=False,
         ),
@@ -143,12 +146,19 @@ async def run_browser_bot(
         ),
     )
     
+    # Track if streaming has started (using a list to work around closure)
+    streaming_started = [False]
+    
     # Event handlers
     @transport.event_handler("on_first_participant_joined")
     async def on_first_participant_joined(transport, participant):
         logger.info(f"👋 First participant joined: {participant}")
-        # Start streaming browser frames
-        asyncio.create_task(streamer.capture_and_stream())
+        # Wait a bit for camera to be ready, then start streaming
+        if not streaming_started[0]:
+            await asyncio.sleep(1.0)  # Give camera time to initialize
+            logger.info("🎬 Starting video stream...")
+            asyncio.create_task(streamer.capture_and_stream())
+            streaming_started[0] = True
     
     @transport.event_handler("on_participant_left")
     async def on_participant_left(transport, participant, reason):
@@ -162,6 +172,12 @@ async def run_browser_bot(
     @transport.event_handler("on_call_state_updated")
     async def on_call_state_updated(transport, state):
         logger.info(f"📞 Call state: {state}")
+        # Start streaming when fully joined (if not already started)
+        if state == "joined" and not streaming_started[0]:
+            await asyncio.sleep(0.5)  # Small delay for camera initialization
+            logger.info("🎬 Starting video stream (call joined)...")
+            asyncio.create_task(streamer.capture_and_stream())
+            streaming_started[0] = True
     
     # Run the pipeline
     runner = PipelineRunner(handle_sigint=False, force_gc=True)
