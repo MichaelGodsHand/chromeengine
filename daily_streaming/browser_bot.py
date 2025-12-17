@@ -139,9 +139,11 @@ async def run_browser_bot(
             audio_in_enabled=False,   # No audio input
             audio_out_enabled=False,  # No audio output
             video_out_enabled=True,   # Video output enabled!
+            video_out_is_live=True,   # CRITICAL: Enable live video streaming (not still frame)
             camera_out_enabled=True,   # Explicitly enable camera output
             video_out_width=1280,      # Hint for Daily (browser window size)
             video_out_height=720,      # Hint for Daily (browser window size)
+            video_out_framerate=10,    # Match our capture rate (~10 FPS)
             video_out_color_format="RGB",  # RGB format
             vad_enabled=False,        # No voice activity detection needed
             transcription_enabled=False,
@@ -171,33 +173,21 @@ async def run_browser_bot(
     
     # Event handlers
     async def start_streaming_safely():
-        """Start streaming with proper delays to ensure camera is ready."""
+        """Start streaming after a delay - Daily will handle camera initialization."""
         if streaming_started[0]:
             return
         
-        logger.info("⏳ Waiting for camera to initialize...")
-        await asyncio.sleep(2.0)  # Give camera more time to fully initialize
+        logger.info("⏳ Waiting for transport to be ready...")
+        await asyncio.sleep(3.0)  # Give Daily transport time to fully initialize
         
-        # Check if camera is available
-        if hasattr(transport, '_camera') and transport._camera:
-            logger.info("✅ Camera ready, starting video stream...")
-            streaming_started[0] = True
-            asyncio.create_task(streamer.capture_and_stream())
-        else:
-            logger.warning("⚠️ Camera not ready yet, will retry...")
-            # Retry after a bit more
-            await asyncio.sleep(1.0)
-            if hasattr(transport, '_camera') and transport._camera:
-                logger.info("✅ Camera ready (retry), starting video stream...")
-                streaming_started[0] = True
-                asyncio.create_task(streamer.capture_and_stream())
-            else:
-                logger.error("❌ Camera never became ready!")
+        logger.info("🎬 Starting video stream...")
+        streaming_started[0] = True
+        asyncio.create_task(streamer.capture_and_stream())
     
     @transport.event_handler("on_first_participant_joined")
     async def on_first_participant_joined(transport, participant):
         logger.info(f"👋 First participant joined: {participant}")
-        # Start streaming after camera is ready
+        # Start streaming after delay
         asyncio.create_task(start_streaming_safely())
     
     @transport.event_handler("on_participant_left")
