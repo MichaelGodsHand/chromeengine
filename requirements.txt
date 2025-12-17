@@ -1,18 +1,23 @@
 # Core FastAPI requirements
-fastapi==0.115.0
-uvicorn[standard]==0.32.0
-python-dotenv==1.0.1
-pydantic==2.10.6
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+python-dotenv>=1.0.1
+pydantic>=2.11.5
 
 # Browser-use and dependencies
 browser-use>=0.11.1
 openai>=1.0.0
 
 # Server dependencies
-gunicorn==23.0.0
-python-multipart==0.0.18
+gunicorn>=23.0.0
+python-multipart>=0.0.18
 
 # For Cloud Run deployment
 aiohttp>=3.9.0
 requests>=2.31.0
+
+# Pipecat and Daily (for streaming bot)
+pipecat-ai>=0.0.90
+pillow>=10.0.0
+loguru>=0.7.0
 
