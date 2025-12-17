@@ -42,17 +42,22 @@ class BrowserFrameStreamer(FrameProcessor):
     async def capture_and_stream(self):
         """Continuously capture browser screenshots and push as video frames."""
         import aiohttp
+        import time
         
         frame_count = 0
-        logger.info("🎬 Starting frame capture loop...")
+        frame_interval = 0.25  # 4 FPS = 250ms between frames (more stable)
+        last_frame_time = time.time()
+        logger.info("🎬 Starting frame capture loop at 4 FPS...")
         
         while self._is_streaming:
+            frame_start_time = time.time()
+            
             try:
                 # Get screenshot from FastAPI
                 async with aiohttp.ClientSession() as session:
                     async with session.get(
                         f"{self.fastapi_url}/streaming/get-screenshot/{self.session_id}",
-                        timeout=aiohttp.ClientTimeout(total=5)
+                        timeout=aiohttp.ClientTimeout(total=3)  # Reduced timeout
                     ) as response:
                         if response.status == 200:
                             data = await response.json()
@@ -76,30 +81,31 @@ class BrowserFrameStreamer(FrameProcessor):
                                 
                                 if len(rgb_bytes) != expected_bytes:
                                     logger.error(f"❌ Byte size mismatch! Got {len(rgb_bytes)}, expected {expected_bytes} for {width}x{height}")
-                                    await asyncio.sleep(0.2)
-                                    continue
-                                
-                                # Create frame with actual image dimensions
-                                frame = OutputImageRawFrame(
-                                    image=rgb_bytes,
-                                    size=(width, height),
-                                    format="RGB"
-                                )
-                                
-                                # Push frame to pipeline - let Daily handle it
-                                try:
-                                    await self.push_frame(frame)
-                                    frame_count += 1
-                                    if frame_count % 15 == 0:  # Log every 15 frames (~3 seconds at 5 FPS)
-                                        logger.info(f"📸 Sent {frame_count} frames, latest: {width}x{height} RGB ({len(rgb_bytes)} bytes)")
-                                except Exception as frame_error:
-                                    logger.error(f"❌ Error pushing frame #{frame_count}: {frame_error}", exc_info=True)
+                                    # Don't skip sleep - maintain timing
+                                else:
+                                    # Create frame with actual image dimensions
+                                    frame = OutputImageRawFrame(
+                                        image=rgb_bytes,
+                                        size=(width, height),
+                                        format="RGB"
+                                    )
+                                    
+                                    # Push frame to pipeline - let Daily handle it
+                                    try:
+                                        await self.push_frame(frame)
+                                        frame_count += 1
+                                        if frame_count % 12 == 0:  # Log every 12 frames (~3 seconds at 4 FPS)
+                                            logger.info(f"📸 Sent {frame_count} frames, latest: {width}x{height} RGB ({len(rgb_bytes)} bytes)")
+                                    except Exception as frame_error:
+                                        logger.error(f"❌ Error pushing frame #{frame_count}: {frame_error}", exc_info=True)
                             else:
                                 logger.warning("⚠️ No screenshot data in response")
                         elif response.status == 429:
                             # Rate limited - back off
                             logger.warning("⚠️ Rate limited (429), backing off for 2 seconds...")
                             await asyncio.sleep(2.0)
+                            last_frame_time = time.time()  # Reset timing
+                            continue
                         else:
                             logger.warning(f"⚠️ Screenshot request failed: HTTP {response.status}")
                         
@@ -108,8 +114,15 @@ class BrowserFrameStreamer(FrameProcessor):
             except Exception as e:
                 logger.error(f"❌ Error capturing frame: {e}", exc_info=True)
             
-            # Capture at ~5 FPS (every 200ms) - reduces rate limiting issues
-            await asyncio.sleep(0.2)
+            # Maintain consistent frame timing - sleep for remaining time
+            elapsed = time.time() - frame_start_time
+            sleep_time = max(0, frame_interval - elapsed)
+            if sleep_time > 0:
+                await asyncio.sleep(sleep_time)
+            else:
+                # If we're running behind, log it but don't skip frames
+                if elapsed > frame_interval * 1.5:
+                    logger.warning(f"⚠️ Frame capture took {elapsed:.3f}s (target: {frame_interval}s)")
         
         logger.info(f"🛑 Frame capture stopped. Total frames sent: {frame_count}")
     
@@ -147,7 +160,7 @@ async def run_browser_bot(
             camera_out_enabled=True,   # Explicitly enable camera output
             video_out_width=1280,      # Hint for Daily (browser window size)
             video_out_height=720,      # Hint for Daily (browser window size)
-            video_out_framerate=5,     # Match our capture rate (5 FPS - reduces rate limiting)
+            video_out_framerate=4,     # Match our capture rate (4 FPS - stable playback)
             video_out_color_format="RGB",  # RGB format
             vad_enabled=False,        # No voice activity detection needed
             transcription_enabled=False,
