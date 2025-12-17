@@ -76,7 +76,7 @@ class BrowserFrameStreamer(FrameProcessor):
                                 
                                 if len(rgb_bytes) != expected_bytes:
                                     logger.error(f"❌ Byte size mismatch! Got {len(rgb_bytes)}, expected {expected_bytes} for {width}x{height}")
-                                    await asyncio.sleep(0.1)
+                                    await asyncio.sleep(0.2)
                                     continue
                                 
                                 # Create frame with actual image dimensions
@@ -90,12 +90,16 @@ class BrowserFrameStreamer(FrameProcessor):
                                 try:
                                     await self.push_frame(frame)
                                     frame_count += 1
-                                    if frame_count % 30 == 0:  # Log every 30 frames (~3 seconds)
+                                    if frame_count % 15 == 0:  # Log every 15 frames (~3 seconds at 5 FPS)
                                         logger.info(f"📸 Sent {frame_count} frames, latest: {width}x{height} RGB ({len(rgb_bytes)} bytes)")
                                 except Exception as frame_error:
                                     logger.error(f"❌ Error pushing frame #{frame_count}: {frame_error}", exc_info=True)
                             else:
                                 logger.warning("⚠️ No screenshot data in response")
+                        elif response.status == 429:
+                            # Rate limited - back off
+                            logger.warning("⚠️ Rate limited (429), backing off for 2 seconds...")
+                            await asyncio.sleep(2.0)
                         else:
                             logger.warning(f"⚠️ Screenshot request failed: HTTP {response.status}")
                         
@@ -104,8 +108,8 @@ class BrowserFrameStreamer(FrameProcessor):
             except Exception as e:
                 logger.error(f"❌ Error capturing frame: {e}", exc_info=True)
             
-            # Capture at ~10 FPS
-            await asyncio.sleep(0.1)
+            # Capture at ~5 FPS (every 200ms) - reduces rate limiting issues
+            await asyncio.sleep(0.2)
         
         logger.info(f"🛑 Frame capture stopped. Total frames sent: {frame_count}")
     
@@ -143,7 +147,7 @@ async def run_browser_bot(
             camera_out_enabled=True,   # Explicitly enable camera output
             video_out_width=1280,      # Hint for Daily (browser window size)
             video_out_height=720,      # Hint for Daily (browser window size)
-            video_out_framerate=10,    # Match our capture rate (~10 FPS)
+            video_out_framerate=5,     # Match our capture rate (5 FPS - reduces rate limiting)
             video_out_color_format="RGB",  # RGB format
             vad_enabled=False,        # No voice activity detection needed
             transcription_enabled=False,
