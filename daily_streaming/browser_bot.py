@@ -28,7 +28,7 @@ class BrowserFrameStreamer(FrameProcessor):
     Captures frames from the browser and streams them to Daily.
     """
     
-    def __init__(self, session_id: str, fastapi_url: str = "http://localhost:8000"):
+    def __init__(self, session_id: str, fastapi_url: str = "https://chromeengine-739298578243.us-central1.run.app"):
         super().__init__()
         self.session_id = session_id
         self.fastapi_url = fastapi_url
@@ -43,12 +43,16 @@ class BrowserFrameStreamer(FrameProcessor):
         """Continuously capture browser screenshots and push as video frames."""
         import aiohttp
         
+        frame_count = 0
+        logger.info("🎬 Starting frame capture loop...")
+        
         while self._is_streaming:
             try:
                 # Get screenshot from FastAPI
                 async with aiohttp.ClientSession() as session:
                     async with session.get(
-                        f"{self.fastapi_url}/streaming/get-screenshot/{self.session_id}"
+                        f"{self.fastapi_url}/streaming/get-screenshot/{self.session_id}",
+                        timeout=aiohttp.ClientTimeout(total=5)
                     ) as response:
                         if response.status == 200:
                             data = await response.json()
@@ -68,6 +72,12 @@ class BrowserFrameStreamer(FrameProcessor):
                                 
                                 # Convert to raw RGB bytes - let Daily handle aspect ratio
                                 rgb_bytes = img.tobytes()
+                                expected_bytes = width * height * 3
+                                
+                                if len(rgb_bytes) != expected_bytes:
+                                    logger.error(f"❌ Byte size mismatch! Got {len(rgb_bytes)}, expected {expected_bytes} for {width}x{height}")
+                                    await asyncio.sleep(0.1)
+                                    continue
                                 
                                 # Create frame with actual image dimensions
                                 frame = OutputImageRawFrame(
@@ -79,15 +89,25 @@ class BrowserFrameStreamer(FrameProcessor):
                                 # Push frame to pipeline - let Daily handle it
                                 try:
                                     await self.push_frame(frame)
-                                    logger.debug(f"📸 Pushed frame: {width}x{height} RGB")
+                                    frame_count += 1
+                                    if frame_count % 30 == 0:  # Log every 30 frames (~3 seconds)
+                                        logger.info(f"📸 Sent {frame_count} frames, latest: {width}x{height} RGB ({len(rgb_bytes)} bytes)")
                                 except Exception as frame_error:
-                                    logger.error(f"Error pushing frame: {frame_error}", exc_info=True)
+                                    logger.error(f"❌ Error pushing frame #{frame_count}: {frame_error}", exc_info=True)
+                            else:
+                                logger.warning("⚠️ No screenshot data in response")
+                        else:
+                            logger.warning(f"⚠️ Screenshot request failed: HTTP {response.status}")
                         
+            except asyncio.TimeoutError:
+                logger.warning("⏱️ Screenshot request timed out")
             except Exception as e:
-                logger.error(f"Error capturing frame: {e}", exc_info=True)
+                logger.error(f"❌ Error capturing frame: {e}", exc_info=True)
             
             # Capture at ~10 FPS
             await asyncio.sleep(0.1)
+        
+        logger.info(f"🛑 Frame capture stopped. Total frames sent: {frame_count}")
     
     def stop_streaming(self):
         """Stop the streaming loop."""
@@ -98,7 +118,7 @@ async def run_browser_bot(
     room_url: str,
     session_id: str,
     token: Optional[str] = None,
-    fastapi_url: str = "http://localhost:8000"
+    fastapi_url: str = "https://chromeengine-739298578243.us-central1.run.app"
 ):
     """
     Run the browser streaming bot.
@@ -150,15 +170,35 @@ async def run_browser_bot(
     streaming_started = [False]
     
     # Event handlers
+    async def start_streaming_safely():
+        """Start streaming with proper delays to ensure camera is ready."""
+        if streaming_started[0]:
+            return
+        
+        logger.info("⏳ Waiting for camera to initialize...")
+        await asyncio.sleep(2.0)  # Give camera more time to fully initialize
+        
+        # Check if camera is available
+        if hasattr(transport, '_camera') and transport._camera:
+            logger.info("✅ Camera ready, starting video stream...")
+            streaming_started[0] = True
+            asyncio.create_task(streamer.capture_and_stream())
+        else:
+            logger.warning("⚠️ Camera not ready yet, will retry...")
+            # Retry after a bit more
+            await asyncio.sleep(1.0)
+            if hasattr(transport, '_camera') and transport._camera:
+                logger.info("✅ Camera ready (retry), starting video stream...")
+                streaming_started[0] = True
+                asyncio.create_task(streamer.capture_and_stream())
+            else:
+                logger.error("❌ Camera never became ready!")
+    
     @transport.event_handler("on_first_participant_joined")
     async def on_first_participant_joined(transport, participant):
         logger.info(f"👋 First participant joined: {participant}")
-        # Wait a bit for camera to be ready, then start streaming
-        if not streaming_started[0]:
-            await asyncio.sleep(1.0)  # Give camera time to initialize
-            logger.info("🎬 Starting video stream...")
-            asyncio.create_task(streamer.capture_and_stream())
-            streaming_started[0] = True
+        # Start streaming after camera is ready
+        asyncio.create_task(start_streaming_safely())
     
     @transport.event_handler("on_participant_left")
     async def on_participant_left(transport, participant, reason):
@@ -174,10 +214,7 @@ async def run_browser_bot(
         logger.info(f"📞 Call state: {state}")
         # Start streaming when fully joined (if not already started)
         if state == "joined" and not streaming_started[0]:
-            await asyncio.sleep(0.5)  # Small delay for camera initialization
-            logger.info("🎬 Starting video stream (call joined)...")
-            asyncio.create_task(streamer.capture_and_stream())
-            streaming_started[0] = True
+            asyncio.create_task(start_streaming_safely())
     
     # Run the pipeline
     runner = PipelineRunner(handle_sigint=False, force_gc=True)
@@ -203,7 +240,7 @@ async def start_bot_for_session(
     session_id: str,
     room_url: str,
     token: Optional[str] = None,
-    fastapi_url: str = "http://localhost:8000"
+    fastapi_url: str = "https://chromeengine-739298578243.us-central1.run.app"
 ) -> str:
     """
     Start a bot for a browser session.
