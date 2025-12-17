@@ -53,10 +53,9 @@ USE_JUDGE = False  # Set to True to enable judge evaluation of agent tasks
 HEADLESS_MODE = os.getenv("HEADLESS_MODE", "false").lower() == "true"
 logger.info(f"🖥️ Headless mode: {HEADLESS_MODE}")
 
-# Internal API URL for bot to connect back (localhost since bot runs in same container)
-API_PORT = int(os.getenv("PORT", "8000"))
-INTERNAL_API_URL = f"http://localhost:{API_PORT}"
-logger.info(f"🔗 Internal API URL: {INTERNAL_API_URL}")
+# Cloud Run API URL (hardcoded for bot to connect)
+CLOUD_RUN_API_URL = "https://chromeengine-739298578243.us-central1.run.app"
+logger.info(f"🔗 Cloud Run API URL: {CLOUD_RUN_API_URL}")
 
 # Chrome args for Docker/Cloud Run environments
 CHROME_ARGS = [
@@ -568,7 +567,7 @@ async def create_daily_room(request: CreateRoomRequest):
         bot_id = await start_bot_for_session(
             session_id=request.session_id,
             room_url=room_data["url"],
-            fastapi_url=INTERNAL_API_URL
+            fastapi_url=CLOUD_RUN_API_URL
         )
         
         active_sessions[request.session_id]["bot_id"] = bot_id
